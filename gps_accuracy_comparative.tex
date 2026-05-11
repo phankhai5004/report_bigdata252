@@ -97,7 +97,7 @@ Timetable source         & Operational GTFS (\texttt{stop\_times.csv}) \\
 \label{sec:metrics}
 % ─────────────────────────────────────────────────────────────────────────────
 
-Two complementary metrics are employed across all algorithms.
+The following metric is used to evaluate all algorithms.
 
 \paragraph{Mean Distance to Route (MDR).}
 For a filtered trajectory $\{\tilde{\mathbf{p}}_k\}_{k=1}^{N}$, MDR quantifies
@@ -111,21 +111,6 @@ average spatial deviation from the nominal route polyline $\mathcal{R}$:
 \end{equation}
 
 Lower MDR indicates tighter adherence to the expected route path.
-
-\paragraph{Mean Heading Change (MHC).}
-MHC quantifies trajectory smoothness by measuring the average absolute change
-in instantaneous bearing between consecutive pings:
-
-\begin{equation}
-    \text{MHC} = \frac{1}{N-2}
-        \sum_{k=2}^{N-1} \left|\,\theta_k - \theta_{k-1}\,\right|
-    \quad [{}^\circ]
-    \label{eq:mhc}
-\end{equation}
-
-\noindent where $\theta_k = \arctan2(\Delta\lambda_k,\,\Delta\phi_k)$ is the
-bearing from ping $k-1$ to ping $k$. Lower MHC indicates a smoother,
-less jittery trajectory.
 
 \paragraph{Improvement percentage.}
 For any metric $M$, the improvement of a filtered trajectory relative to raw
@@ -465,42 +450,35 @@ vehicles for each algorithm evaluated so far.
 \toprule
 \textbf{Metric} & \textbf{Raw GPS} & \textbf{KF} & \textbf{MM-KF} \\
 \midrule
-Mean dist.\ to route (m)      & 243.58 & ---     & 229.63 \\
-MDR improvement (\%)           & ---    & $-36.5$ & $\mathbf{+41.8}$ \\
-Mean heading change ($^\circ$) & 30.43  & ---     & 23.31 \\
-MHC improvement (\%)           & ---    & $+18.6$ & $\mathbf{+22.3}$ \\
+Mean dist.\ to route (m) & 243.58 & ---     & 229.63 \\
+MDR improvement (\%)     & ---    & $-36.5$ & $\mathbf{+41.8}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{Per-Route Breakdown}
 
-Table~\ref{tab:per_route} presents per-route MDR and MHC improvement
-percentages.
+Table~\ref{tab:per_route} presents per-route MDR improvement percentages.
 
 \begin{table}[H]
 \centering
-\caption{Per-route average improvement (\%)}
+\caption{Per-route MDR improvement (\%)}
 \label{tab:per_route}
-\begin{tabular}{lrrrr}
+\begin{tabular}{lrr}
 \toprule
-\multirow{2}{*}{\textbf{Route}} &
-\multicolumn{2}{c}{\textbf{MDR improvement (\%)}} &
-\multicolumn{2}{c}{\textbf{MHC improvement (\%)}} \\
-\cmidrule(lr){2-3}\cmidrule(lr){4-5}
- & KF & MM-KF & KF & MM-KF \\
+\textbf{Route} & \textbf{KF} & \textbf{MM-KF} \\
 \midrule
-29  & $-1.9$   & $+3.3$  & $+9.4$  & $+12.0$ \\
-41  & $-4.9$   & $+5.4$  & $+17.9$ & $+13.9$ \\
-57  & $-6.0$   & $+1.8$  & $+21.6$ & $+20.7$ \\
-61  & $-171.1$ & $+93.1$ & $+33.5$ & $+34.6$ \\
-84  & $-69.6$  & $+97.4$ & $+20.8$ & $+24.0$ \\
-99  & $-24.5$  & $+38.9$ & $+16.8$ & $+31.2$ \\
-102 & $-38.6$  & $+98.5$ & $+19.2$ & $+22.6$ \\
-141 & $-50.1$  & $+21.6$ & $+24.1$ & $+22.9$ \\
-151 & $-4.1$   & $+40.8$ & $+11.3$ & $+22.5$ \\
+29  & $-1.9$   & $+3.3$  \\
+41  & $-4.9$   & $+5.4$  \\
+57  & $-6.0$   & $+1.8$  \\
+61  & $-171.1$ & $+93.1$ \\
+84  & $-69.6$  & $+97.4$ \\
+99  & $-24.5$  & $+38.9$ \\
+102 & $-38.6$  & $+98.5$ \\
+141 & $-50.1$  & $+21.6$ \\
+151 & $-4.1$   & $+40.8$ \\
 \midrule
-\textbf{Fleet avg.} & $-36.5$ & $\mathbf{+41.8}$ & $+18.6$ & $\mathbf{+22.3}$ \\
+\textbf{Fleet avg.} & $-36.5$ & $\mathbf{+41.8}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -594,14 +572,13 @@ departs cleanly from the stop without a transient overshoot.
 This report compares multiple approaches to GPS trajectory smoothing for urban
 bus fleets, evaluated on 720,088 GPS pings from 123 vehicles across nine bus
 routes in Ho Chi Minh City on 18 March 2025. The shared evaluation framework
-(Section~\ref{sec:metrics}) uses Mean Distance to Route (MDR) and Mean Heading
-Change (MHC) to measure route adherence and trajectory smoothness respectively.
+(Section~\ref{sec:metrics}) uses Mean Distance to Route (MDR) to measure
+route adherence.
 
 Among the algorithms evaluated to date, the Map-Matched Kalman Filter with
 Scheduled Stop Detection (MM-KF) achieves the strongest results: a fleet-wide
-MDR improvement of \textbf{+41.8\%} and MHC improvement of \textbf{+22.3\%}
-relative to raw GPS, substantially outperforming the standard KF on both
-metrics.
+MDR improvement of \textbf{+41.8\%} relative to raw GPS, substantially
+outperforming the standard KF.
 
 As additional algorithms are contributed to Section~\ref{sec:algorithms},
 their results should be appended to the tables in
