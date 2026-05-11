@@ -26,9 +26,8 @@
 }
 
 \title{%
-    \textbf{GPS Trajectory Smoothing for Urban Bus Fleets} \\[0.5em]
-    \large Standard Kalman Filter vs. Map-Matched Kalman Filter \\
-    with Scheduled Stop Detection
+    \textbf{Enhancing GPS Accuracy with Machine Learning} \\[0.5em]
+    \large A Comparative Analysis of Algorithms
 }
 \author{Urban Fleet Management System (UFMS) Research}
 \date{Ho Chi Minh City, 2025}
@@ -56,28 +55,105 @@ management dashboards display erratic vehicle traces, estimated time-of-arrival
 misclassify legitimate stops as off-route events. An effective noise-reduction
 pipeline is therefore a prerequisite for reliable fleet intelligence.
 
-This report describes and evaluates two approaches to GPS trajectory smoothing
-applied to a full operational day of bus GPS data collected on 18 March 2025
-across nine routes in Ho Chi Minh City, comprising 720,088 positional fixes
-from 123 vehicles.
-
-\begin{itemize}
-    \item \textbf{Standard Kalman Filter (KF)} — a classical recursive Bayesian
-          estimator that fuses a constant-velocity motion model with GPS
-          measurements, operating solely on the position/velocity state.
-    \item \textbf{Map-Matched Kalman Filter with Scheduled Stop Detection
-          (MM-KF)} — the proposed algorithm, which augments the standard KF
-          with (i) a stop-aware process-noise schedule derived from the
-          operational GTFS timetable, and (ii) a post-update geometric
-          projection step that constrains filtered positions to lie on the
-          known route polyline.
-\end{itemize}
+This report describes and evaluates multiple approaches to GPS trajectory
+smoothing applied to a full operational day of bus GPS data collected on
+18 March 2025 across nine routes in Ho Chi Minh City, comprising 720,088
+positional fixes from 123 vehicles. Each algorithm is presented as a
+self-contained section (Section~\ref{sec:algorithms}) and evaluated against
+the shared metrics defined in Section~\ref{sec:metrics}. Comparative results
+are reported in Section~\ref{sec:results}.
 
 % ─────────────────────────────────────────────────────────────────────────────
-\section{Background: The Kalman Filter}
+\section{Dataset}
+\label{sec:dataset}
 % ─────────────────────────────────────────────────────────────────────────────
 
-\subsection{State-Space Formulation}
+All algorithms in this report are evaluated on the same dataset, summarised
+in Table~\ref{tab:dataset}.
+
+\begin{table}[H]
+\centering
+\caption{Dataset statistics}
+\label{tab:dataset}
+\begin{tabular}{lrr}
+\toprule
+\textbf{Property} & \textbf{Value} \\
+\midrule
+Date of collection       & 18 March 2025 \\
+Routes                   & 9 (nos.\ 29, 41, 57, 61, 84, 99, 102, 141, 151) \\
+Vehicles                 & 123 \\
+Total GPS pings          & 720,088 \\
+Average pings/vehicle    & 5,854 \\
+GPS speed availability   & $\approx$50\% (remainder computed via haversine) \\
+Average \% pings at stop & 26.5\% \\
+Route geometry source    & OpenStreetMap (\texttt{hcmc\_bus\_routes.gpkg}) \\
+Timetable source         & Operational GTFS (\texttt{stop\_times.csv}) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Evaluation Metrics}
+\label{sec:metrics}
+% ─────────────────────────────────────────────────────────────────────────────
+
+Two complementary metrics are employed across all algorithms.
+
+\paragraph{Mean Distance to Route (MDR).}
+For a filtered trajectory $\{\tilde{\mathbf{p}}_k\}_{k=1}^{N}$, MDR quantifies
+average spatial deviation from the nominal route polyline $\mathcal{R}$:
+
+\begin{equation}
+    \text{MDR} = \frac{1}{N}\sum_{k=1}^{N}
+        d\!\left(\tilde{\mathbf{p}}_k,\, \mathcal{R}\right) \cdot D_{\text{deg}}
+    \quad [\text{metres}]
+    \label{eq:mdr}
+\end{equation}
+
+Lower MDR indicates tighter adherence to the expected route path.
+
+\paragraph{Mean Heading Change (MHC).}
+MHC quantifies trajectory smoothness by measuring the average absolute change
+in instantaneous bearing between consecutive pings:
+
+\begin{equation}
+    \text{MHC} = \frac{1}{N-2}
+        \sum_{k=2}^{N-1} \left|\,\theta_k - \theta_{k-1}\,\right|
+    \quad [{}^\circ]
+    \label{eq:mhc}
+\end{equation}
+
+\noindent where $\theta_k = \arctan2(\Delta\lambda_k,\,\Delta\phi_k)$ is the
+bearing from ping $k-1$ to ping $k$. Lower MHC indicates a smoother,
+less jittery trajectory.
+
+\paragraph{Improvement percentage.}
+For any metric $M$, the improvement of a filtered trajectory relative to raw
+GPS is reported as:
+
+\begin{equation}
+    \Delta M [\%] = \frac{M_{\text{raw}} - M_{\text{filtered}}}{M_{\text{raw}}} \times 100
+    \label{eq:impr_pct}
+\end{equation}
+
+A positive value indicates improvement; a negative value indicates
+deterioration.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Algorithms}
+\label{sec:algorithms}
+% ─────────────────────────────────────────────────────────────────────────────
+
+Each subsection below describes one algorithm: its theoretical background,
+implementation, and per-algorithm notes. Aggregate comparison across all
+algorithms is deferred to Section~\ref{sec:results}.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\subsection{Standard Kalman Filter (KF)}
+\label{sec:kf}
+% ─────────────────────────────────────────────────────────────────────────────
+
+\subsubsection{State-Space Formulation}
 
 The Kalman filter \cite{kalman1960} operates on a linear discrete-time
 dynamical system defined by the state-transition and observation equations:
@@ -98,7 +174,7 @@ matrix, $\mathbf{Q}$ is the process-noise covariance, and $\mathbf{R}$ is the
 measurement-noise covariance. Both noise terms are assumed to be zero-mean
 white Gaussian and mutually uncorrelated.
 
-\subsection{State Vector for GPS Tracking}
+\subsubsection{State Vector for GPS Tracking}
 
 For bus GPS tracking, the state vector encodes both position and velocity in
 geodetic coordinates:
@@ -140,13 +216,13 @@ with unit time step $\Delta t = 1$:
 GPS receivers observe only position, hence $\mathbf{H}$ projects the full
 state to the two-dimensional observation space.
 
-\subsection{Recursive Estimation Equations}
+\subsubsection{Recursive Estimation Equations}
 
 The Kalman filter alternates between a \emph{predict} step, which propagates
 the state estimate forward in time using the motion model, and an \emph{update}
 step, which corrects the prediction using the incoming measurement.
 
-\subsubsection{Predict Step}
+\paragraph{Predict Step}
 
 \begin{align}
     \hat{\mathbf{x}}^-_k &= \mathbf{F}\,\hat{\mathbf{x}}_{k-1}
@@ -158,7 +234,7 @@ step, which corrects the prediction using the incoming measurement.
 \noindent where $\hat{\mathbf{x}}^-_k$ is the \emph{a priori} state estimate
 and $\mathbf{P}^-_k$ is its associated covariance matrix.
 
-\subsubsection{Update Step}
+\paragraph{Update Step}
 
 \begin{align}
     \boldsymbol{\nu}_k &= \mathbf{z}_k - \mathbf{H}\,\hat{\mathbf{x}}^-_k
@@ -178,7 +254,7 @@ between measurement and prediction), $\mathbf{S}_k$ is the innovation
 covariance, and $\mathbf{K}_k$ is the \emph{Kalman gain}, which determines
 the weight assigned to the new measurement relative to the prior prediction.
 
-\subsection{Pseudocode}
+\subsubsection{Pseudocode}
 
 \begin{algorithm}[H]
 \caption{Standard Kalman Filter for GPS Tracking}
@@ -202,7 +278,7 @@ the weight assigned to the new measurement relative to the prior prediction.
 \end{algorithmic}
 \end{algorithm}
 
-\subsection{Limitations in Urban Bus Applications}
+\subsubsection{Limitations in Urban Bus Applications}
 
 While the standard KF is theoretically optimal under its Gaussian assumptions,
 three structural limitations reduce its effectiveness for urban bus tracking:
@@ -225,14 +301,15 @@ three structural limitations reduce its effectiveness for urban bus tracking:
 \end{enumerate}
 
 % ─────────────────────────────────────────────────────────────────────────────
-\section{Proposed Algorithm: Map-Matched Kalman Filter with\\
-Scheduled Stop Detection (MM-KF)}
+\subsection{Map-Matched Kalman Filter with Scheduled Stop Detection (MM-KF)}
+\label{sec:mmkf}
 % ─────────────────────────────────────────────────────────────────────────────
 
-\subsection{Core Idea}
+\subsubsection{Core Idea}
 
-The proposed MM-KF addresses the three limitations above by augmenting the
-standard KF pipeline with two domain-knowledge components:
+The MM-KF addresses the three limitations of the standard KF
+(Section~\ref{sec:kf}) by augmenting the standard KF pipeline with two
+domain-knowledge components:
 
 \begin{enumerate}
     \item \textbf{Scheduled stop detection.} The GTFS \texttt{stop\_times}
@@ -252,7 +329,7 @@ standard KF pipeline with two domain-knowledge components:
           bus must travel along its designated route.
 \end{enumerate}
 
-\subsection{Adaptive Process Noise}
+\subsubsection{Adaptive Process Noise}
 
 Let $\mathcal{S}(t_k)$ be the indicator function that equals 1 if ping $k$
 falls within a scheduled stop window and 0 otherwise. The process-noise matrix
@@ -284,7 +361,7 @@ anchoring the position estimate. Conversely, the velocity diagonal entries are
 large, allowing the model to rapidly decay stored velocity to zero without
 constraining subsequent acceleration when the bus departs.
 
-\subsection{Map-Matching Projection}
+\subsubsection{Map-Matching Projection}
 
 Let $\hat{\mathbf{p}}_k = [\hat{\phi}_k,\,\hat{\lambda}_k]^\top$ denote the
 KF-updated position. The map-matching operator
@@ -313,7 +390,7 @@ The projection $\Pi_{\mathcal{R}}$ is computed as the nearest point on the
 union geometry of all direction polylines of route $\mathcal{R}$ using the
 Shapely computational geometry library.
 
-\subsection{Full Algorithm}
+\subsubsection{Full Algorithm}
 
 \begin{algorithm}[H]
 \caption{Map-Matched Kalman Filter with Scheduled Stop Detection (MM-KF)}
@@ -357,87 +434,28 @@ Shapely computational geometry library.
 \end{algorithmic}
 \end{algorithm}
 
+% =============================================================================
+% ADD NEW ALGORITHM HERE
+% Duplicate the subsection block below and fill in your algorithm.
+%
+% \subsection{Your Algorithm Name}
+% \label{sec:youralgo}
+%
+% \subsubsection{Background / Motivation}
+% \subsubsection{Method}
+% \subsubsection{Pseudocode or Key Equations}
+% \subsubsection{Implementation Notes}
+% =============================================================================
+
 % ─────────────────────────────────────────────────────────────────────────────
-\section{Experimental Evaluation}
+\section{Comparative Results}
+\label{sec:results}
 % ─────────────────────────────────────────────────────────────────────────────
 
-\subsection{Dataset}
-
-The evaluation dataset comprises raw GPS telemetry collected by the Urban
-Fleet Management System (UFMS) on 18 March 2025 across nine bus routes in
-Ho Chi Minh City. A summary is provided in Table~\ref{tab:dataset}.
-
-\begin{table}[H]
-\centering
-\caption{Dataset statistics}
-\label{tab:dataset}
-\begin{tabular}{lrr}
-\toprule
-\textbf{Property} & \textbf{Value} \\
-\midrule
-Date of collection       & 18 March 2025 \\
-Routes                   & 9 (nos.\ 29, 41, 57, 61, 84, 99, 102, 141, 151) \\
-Vehicles                 & 123 \\
-Total GPS pings          & 720,088 \\
-Average pings/vehicle    & 5,854 \\
-GPS speed availability   & $\approx$50\% (remainder computed via haversine) \\
-Average \% pings at stop & 26.5\% \\
-Route geometry source    & OpenStreetMap (\texttt{hcmc\_bus\_routes.gpkg}) \\
-Timetable source         & Operational GTFS (\texttt{stop\_times.csv}) \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\subsection{Evaluation Metrics}
-
-Two complementary metrics are employed:
-
-\paragraph{Mean Distance to Route (MDR).}
-For a filtered trajectory $\{\tilde{\mathbf{p}}_k\}_{k=1}^{N}$, MDR quantifies
-average spatial deviation from the nominal route polyline $\mathcal{R}$:
-
-\begin{equation}
-    \text{MDR} = \frac{1}{N}\sum_{k=1}^{N}
-        d\!\left(\tilde{\mathbf{p}}_k,\, \mathcal{R}\right) \cdot D_{\text{deg}}
-    \quad [\text{metres}]
-    \label{eq:mdr}
-\end{equation}
-
-Lower MDR indicates tighter adherence to the expected route path.
-
-\paragraph{Mean Heading Change (MHC).}
-MHC quantifies trajectory smoothness by measuring the average absolute change
-in instantaneous bearing between consecutive pings:
-
-\begin{equation}
-    \text{MHC} = \frac{1}{N-2}
-        \sum_{k=2}^{N-1} \left|\,\theta_k - \theta_{k-1}\,\right|
-    \quad [{}^\circ]
-    \label{eq:mhc}
-\end{equation}
-
-\noindent where $\theta_k = \arctan2(\Delta\lambda_k,\,\Delta\phi_k)$ is the
-bearing from ping $k-1$ to ping $k$. Lower MHC indicates a smoother,
-less jittery trajectory.
-
-\paragraph{Improvement percentage.}
-For any metric $M$, the improvement of a filtered trajectory relative to raw
-GPS is reported as:
-
-\begin{equation}
-    \Delta M [\%] = \frac{M_{\text{raw}} - M_{\text{filtered}}}{M_{\text{raw}}} \times 100
-    \label{eq:impr_pct}
-\end{equation}
-
-A positive value indicates improvement; a negative value indicates
-deterioration.
-
-\subsection{Results}
-
-\subsubsection{Fleet-Wide Summary}
+\subsection{Fleet-Wide Summary}
 
 Table~\ref{tab:fleet_results} reports fleet-wide averages across all 123
-vehicles.
+vehicles for each algorithm evaluated so far.
 
 \begin{table}[H]
 \centering
@@ -445,28 +463,20 @@ vehicles.
 \label{tab:fleet_results}
 \begin{tabular}{lrrr}
 \toprule
-\textbf{Metric} & \textbf{Raw GPS} & \textbf{Standard KF} & \textbf{MM-KF (proposed)} \\
+\textbf{Metric} & \textbf{Raw GPS} & \textbf{KF} & \textbf{MM-KF} \\
 \midrule
-Mean dist.\ to route (m)   & 243.58 & --- & 229.63 \\
-MDR improvement (\%)        & ---    & $-36.5$ & $\mathbf{+41.8}$ \\
-Mean heading change ($^\circ$) & 30.43 & --- & 23.31 \\
-MHC improvement (\%)         & ---   & $+18.6$ & $\mathbf{+22.3}$ \\
+Mean dist.\ to route (m)      & 243.58 & ---     & 229.63 \\
+MDR improvement (\%)           & ---    & $-36.5$ & $\mathbf{+41.8}$ \\
+Mean heading change ($^\circ$) & 30.43  & ---     & 23.31 \\
+MHC improvement (\%)           & ---    & $+18.6$ & $\mathbf{+22.3}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-The standard KF degrades MDR by 36.5\% on average, a result explained in
-Section~\ref{sec:discussion}. The MM-KF improves MDR by 41.8\% and MHC by
-22.3\%, demonstrating that both route adherence and trajectory smoothness are
-simultaneously enhanced by the proposed approach.
+\subsection{Per-Route Breakdown}
 
-\subsubsection{Per-Route Breakdown}
-
-Table~\ref{tab:per_route} presents per-route averages. Route 61 exhibits
-anomalously large MDR values for the standard KF ($-171.1\%$), attributable to
-a discrepancy between the OSM route geometry and the actual GPS distribution
-for that route; the MM-KF corrects this by snapping positions onto the route
-polyline (+93.1\%).
+Table~\ref{tab:per_route} presents per-route MDR and MHC improvement
+percentages.
 
 \begin{table}[H]
 \centering
@@ -478,24 +488,24 @@ polyline (+93.1\%).
 \multicolumn{2}{c}{\textbf{MDR improvement (\%)}} &
 \multicolumn{2}{c}{\textbf{MHC improvement (\%)}} \\
 \cmidrule(lr){2-3}\cmidrule(lr){4-5}
- & Standard KF & MM-KF & Standard KF & MM-KF \\
+ & KF & MM-KF & KF & MM-KF \\
 \midrule
-29  & $-1.9$  & $+3.3$  & $+9.4$  & $+12.0$ \\
-41  & $-4.9$  & $+5.4$  & $+17.9$ & $+13.9$ \\
-57  & $-6.0$  & $+1.8$  & $+21.6$ & $+20.7$ \\
+29  & $-1.9$   & $+3.3$  & $+9.4$  & $+12.0$ \\
+41  & $-4.9$   & $+5.4$  & $+17.9$ & $+13.9$ \\
+57  & $-6.0$   & $+1.8$  & $+21.6$ & $+20.7$ \\
 61  & $-171.1$ & $+93.1$ & $+33.5$ & $+34.6$ \\
-84  & $-69.6$ & $+97.4$ & $+20.8$ & $+24.0$ \\
-99  & $-24.5$ & $+38.9$ & $+16.8$ & $+31.2$ \\
-102 & $-38.6$ & $+98.5$ & $+19.2$ & $+22.6$ \\
-141 & $-50.1$ & $+21.6$ & $+24.1$ & $+22.9$ \\
-151 & $-4.1$  & $+40.8$ & $+11.3$ & $+22.5$ \\
+84  & $-69.6$  & $+97.4$ & $+20.8$ & $+24.0$ \\
+99  & $-24.5$  & $+38.9$ & $+16.8$ & $+31.2$ \\
+102 & $-38.6$  & $+98.5$ & $+19.2$ & $+22.6$ \\
+141 & $-50.1$  & $+21.6$ & $+24.1$ & $+22.9$ \\
+151 & $-4.1$   & $+40.8$ & $+11.3$ & $+22.5$ \\
 \midrule
 \textbf{Fleet avg.} & $-36.5$ & $\mathbf{+41.8}$ & $+18.6$ & $\mathbf{+22.3}$ \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsubsection{Visual Comparison}
+\subsection{Visual Comparison}
 
 Figures~\ref{fig:route29}--\ref{fig:route61} present representative vehicle
 trajectories for three routes, illustrating qualitative differences between
@@ -540,25 +550,18 @@ raw GPS, standard KF, and MM-KF outputs.
 \label{sec:discussion}
 % ─────────────────────────────────────────────────────────────────────────────
 
-\subsection{Why the Standard KF Degrades MDR}
+\subsection{Standard KF: MDR Degradation}
 
 The counter-intuitive MDR degradation produced by the standard KF arises from
 the interaction between the CV motion model and the geometry of urban roads.
 At sharp turns, the CV model predicts a position ahead along the previous
 heading direction; the Kalman gain then blends this prediction with the new
 measurement, producing a smoothed position that lies \emph{outside} the road
-curve. For routes with large mean curvature (e.g., route 141, which traverses
-multiple sharp intersections), this corner-cutting effect systematically
-displaces filtered positions away from the road centreline, increasing MDR
-relative to raw GPS.
+curve. For routes with large mean curvature (e.g., route 141), this
+corner-cutting effect systematically displaces filtered positions away from the
+road centreline, increasing MDR relative to raw GPS.
 
-It is important to note that this does not imply the standard KF is
-\emph{wrong}: the MDR metric measures proximity to the OSM route polyline, not
-to the true vehicle trajectory, which is unobserved. Nonetheless, from a
-practical fleet-management perspective, agreement with the nominal route
-geometry is a desirable property, which motivates the map-matching step.
-
-\subsection{Effect of Scheduled Stop Detection}
+\subsection{MM-KF: Effect of Scheduled Stop Detection}
 
 The stop-detection component contributes two measurable effects. First, it
 suppresses positional jitter during dwell periods, where high-frequency GPS
@@ -567,13 +570,13 @@ Second, the large velocity diagonal entries in $\mathbf{Q}_{\text{stopped}}$
 allow the filter to rapidly zero-out accumulated velocity so that the bus
 departs cleanly from the stop without a transient overshoot.
 
-\subsection{Limitations}
+\subsection{Shared Limitations}
 
 \begin{itemize}
-    \item \textbf{OSM geometry quality.} The map-matching projection is only as
-          accurate as the underlying route polyline. For routes where OSM does
-          not accurately reflect the physical road layout (e.g., route 61), the
-          snap may introduce systematic bias.
+    \item \textbf{OSM geometry quality.} Map-matching is only as accurate as
+          the underlying route polyline. For routes where OSM does not
+          accurately reflect the physical road layout (e.g., route 61), snapping
+          may introduce systematic bias.
 
     \item \textbf{Schedule adherence.} Stop detection assumes vehicles adhere
           to the GTFS timetable. Early or late departures cause the stop window
@@ -581,34 +584,28 @@ departs cleanly from the stop without a transient overshoot.
 
     \item \textbf{Snap threshold sensitivity.} The 150 m threshold was chosen
           empirically. Routes with high GPS noise in urban canyons may benefit
-          from a larger threshold; depot-adjacent routes may require a smaller
-          one.
+          from a larger threshold.
 \end{itemize}
 
 % ─────────────────────────────────────────────────────────────────────────────
 \section{Conclusion}
 % ─────────────────────────────────────────────────────────────────────────────
 
-This report presented and evaluated the Map-Matched Kalman Filter with
-Scheduled Stop Detection (MM-KF), a domain-aware extension of the classical
-Kalman filter for urban bus GPS smoothing. The algorithm integrates three
-components: the standard linear KF for temporal noise reduction, an
-adaptive process-noise schedule derived from the operational GTFS timetable,
-and a geometric map-matching projection that constrains filtered positions to
-the known route polyline.
+This report compares multiple approaches to GPS trajectory smoothing for urban
+bus fleets, evaluated on 720,088 GPS pings from 123 vehicles across nine bus
+routes in Ho Chi Minh City on 18 March 2025. The shared evaluation framework
+(Section~\ref{sec:metrics}) uses Mean Distance to Route (MDR) and Mean Heading
+Change (MHC) to measure route adherence and trajectory smoothness respectively.
 
-Evaluated on 720,088 GPS pings from 123 vehicles across nine bus routes in Ho
-Chi Minh City on 18 March 2025, the MM-KF achieves a fleet-wide mean distance-
-to-route improvement of \textbf{+41.8\%} and a mean heading-change improvement
-of \textbf{+22.3\%} relative to raw GPS, substantially outperforming the
-standard KF on both metrics. The improvements are most pronounced on routes
-with high GPS noise or large deviations from the nominal OSM geometry.
+Among the algorithms evaluated to date, the Map-Matched Kalman Filter with
+Scheduled Stop Detection (MM-KF) achieves the strongest results: a fleet-wide
+MDR improvement of \textbf{+41.8\%} and MHC improvement of \textbf{+22.3\%}
+relative to raw GPS, substantially outperforming the standard KF on both
+metrics.
 
-Future work may explore the replacement of the constant-velocity model with a
-variable-rate turn model (e.g., CTRV) to better handle sharp urban
-intersections, and the integration of a Hidden Markov Model road-segment
-classifier to replace the threshold-based map-matching with a probabilistic
-route assignment.
+As additional algorithms are contributed to Section~\ref{sec:algorithms},
+their results should be appended to the tables in
+Section~\ref{sec:results} for direct comparison.
 
 % ─────────────────────────────────────────────────────────────────────────────
 \begin{thebibliography}{9}
